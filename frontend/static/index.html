@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>CI/CD Pipeline Health Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+/* === Pleasant UI: gradient header, cards, boxed charts, responsive === */
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: "Segoe UI", Roboto, Arial, sans-serif; background: linear-gradient(135deg,#f5f7fa 0%,#c3cfe2 100%); color:#222; min-height:100vh; }
+.header { background: linear-gradient(135deg,#1976d2 0%,#4caf50 100%); color:white; padding:1rem 1.5rem; display:flex; align-items:center; justify-content:space-between; gap:1rem; box-shadow:
+0 6px 18px rgba(2,6,23,0.06); border-bottom: 1px solid rgba(255,255,255,0.08);}
+.header h1 { font-size:1.2rem; font-weight:700; letter-spacing:0.2px; }
+.tabs { display:flex; gap:0.5rem; margin-left:0.5rem; }
+.tab { padding:0.45rem 0.85rem; background: rgba(255,255,255,0.08); color:white; border-radius:8px; cursor:pointer; font-weight:600; transition:all .12s ease; }
+.tab.active { background: rgba(255,255,255,0.18); box-shadow:0 6px 18px rgba(2,6,23,0.06); transform:translateY(-1px); }
+.container { max-width:1200px; margin:1.25rem auto; padding:0 1rem; }
+.grid { display:grid; grid-template-columns:1fr 360px; gap:1rem; align-items:start; }
+@media(max-width:980px){ .grid{ grid-template-columns:1fr; } .right-panel{ order:2; } }
+.metrics { display:grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap:1rem; margin-bottom:1rem; }
+.card { background:white; padding:0.9rem; border-radius:12px; box-shadow:0 6px 18px rgba(2,6,23,0.06); display:flex; flex-direction:column; gap:0.25rem; }
+.card .label { color:#666; font-size:0.9rem; }
+.card .value { font-size:1.45rem; font-weight:700; color:#0f1f3a; }
+.chart-box { background:white; padding:0.9rem; border-radius:12px; box-shadow:0 6px 18px rgba(2,6,23,0.06); margin-bottom:1rem; display:flex; flex-direction:column; }
+.small-grid { display:flex; gap:1rem; align-items:center; }
+.donut { width:180px; height:180px; max-width:180px; max-height:180px; }
+.trendCanvas { width:100%; height:220px; max-height:240px; }
+
+/* pipelines table */
+.pipelines { background:white; border-radius:12px; box-shadow:0 6px 18px rgba(2,6,23,0.06); overflow:hidden; }
+.table-header { padding:0.9rem 1rem; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #f0f0f0; }
+.table-body { max-height:420px; overflow:auto; }
+.pipeline-row { padding:0.9rem 1rem; display:grid; grid-template-columns: 1fr 140px 90px 120px; gap:1rem; align-items:center; border-bottom:1px solid #f7f7f7; cursor:pointer; transition:transform .08s ease, background .08s ease; }
+.pipeline-row:hover { background:#fafafa; transform:translateY(-1px); }
+.pipeline-title { font-weight:700; font-size:0.95rem; color:#0f1f3a; }
+.pipeline-sub { color:#666; font-size:0.85rem; }
+.status { padding:0.28rem 0.6rem; border-radius:12px; font-size:0.78rem; font-weight:700; text-align:center; display:inline-block; }
+.status.success { background:#e8f5e8; color:#2e7d32; }
+.status.failure { background:#ffebee; color:#c62828; }
+.status.in_progress, .status.running { background:#fff8e1; color:#ef6c00; }
+.status.cancelled { background:#eceff1; color:#455a64; }
+
+.filters { display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap; }
+select,input[type="text"]{ padding:0.45rem 0.6rem; border-radius:8px; border:1px solid #e0e0e0; font-size:0.95rem; }
+.btn { padding:0.5rem 0.9rem; border-radius:8px; border:none; cursor:pointer; background:#1976d2; color:white; font-weight:700; }
+.btn.ghost { background:transparent; color:#1976d2; border:1px solid rgba(25,118,210,0.12); }
+
+/* right panel */
+.right-panel { display:flex; flex-direction:column; gap:1rem; }
+.detail-drawer { background:white; padding:1rem; border-radius:12px; box-shadow:0 6px 18px rgba(2,6,23,0.06); }
+.muted { color:#666; font-size:0.9rem; }
+.insight-item { background:#fff; padding:0.6rem; border-radius:8px; box-shadow:0 2px 6px rgba(0,0,0,0.04); display:flex; justify-content:space-between; align-items:center; }
+.loading { padding:1rem; text-align:center; color:#666; }
+
+/* responsive */
+@media(max-width:820px){
+  .pipeline-row { grid-template-columns: 1fr 1fr; row-gap:6px; column-gap:8px; }
+  .grid{ gap:12px; }
+}
+</style>
+</head>
+<body>
+  <div class="header">
+    <div style="display:flex; align-items:center; gap:1rem;">
+      <h1>CI/CD Pipeline Health Dashboard</h1>
+      <div class="tabs" role="tablist" aria-label="Main tabs">
+        <div class="tab active" data-tab="overview">Overview</div>
+        <div class="tab" data-tab="pipelines">Pipelines</div>
+        <div class="tab" data-tab="insights">Insights</div>
+      </div>
+    </div>
+    <div class="controls">
+      <button class="btn ghost" id="refreshBtn">Refresh</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <!-- Overview -->
+    <div id="overview" class="panel">
+      <div class="grid">
+        <div>
+          <div class="metrics">
+            <div class="card">
+              <div class="label">Success Rate</div>
+              <div class="value" id="successRate">-</div>
+              <div class="muted">Last 24 hours</div>
+            </div>
+            <div class="card">
+              <div class="label">Avg Build Time</div>
+              <div class="value" id="avgBuildTime">-</div>
+              <div class="muted">minutes (avg)</div>
+            </div>
+            <div class="card">
+              <div class="label">Total Executions</div>
+              <div class="value" id="totalExecutions">-</div>
+              <div class="muted">last 24 hours</div>
+            </div>
+            <div class="card">
+              <div class="label">Last Build</div>
+              <div class="value" id="lastBuildStatus">-</div>
+              <div class="muted" id="lastBuildWhen"></div>
+            </div>
+          </div>
+
+          <div class="small-grid">
+            <div class="chart-box" style="flex:1;">
+              <h4 style="margin-bottom:0.6rem;">Success Rate Trend</h4>
+              <canvas id="trendChart" class="trendCanvas"></canvas>
+            </div>
+
+            <div class="chart-box" style="width:220px; text-align:center;">
+              <h4 style="margin-bottom:0.6rem;">Success / Failure</h4>
+              <canvas id="donutChart" class="donut"></canvas>
+              <div id="donutText" class="muted" style="margin-top:0.6rem;"></div>
+            </div>
+          </div>
+
+          <div id="overview-note" class="muted" style="margin-top:0.8rem;">
+            Auto-updates every 30s. Click <strong>Pipelines</strong> to view runs and details.
+          </div>
+        </div>
+
+        <aside class="right-panel">
+          <div class="detail-drawer" id="selectedPipeline" style="display:none;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <div style="font-weight:700;" id="selTitle">Details</div>
+              <button class="btn ghost" id="closeDrawer">Close</button>
+            </div>
+            <div style="height:8px"></div>
+            <div id="selContent"></div>
+          </div>
+
+          <div class="detail-drawer" id="quickInsights">
+            <div style="font-weight:700; margin-bottom:0.6rem;">Quick Insights</div>
+            <div class="insight-list" id="insightList">
+              <div class="insight-item"><div class="muted">Loading insights...</div></div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <!-- Pipelines -->
+    <div id="pipelines" class="panel" style="display:none;">
+      <div class="pipelines">
+        <div class="table-header">
+          <div style="font-weight:700;">Recent Pipeline Executions</div>
+          <div style="display:flex; gap:0.5rem; align-items:center;">
+            <input type="text" id="searchBox" placeholder="Search workflow / branch / commit / SHA / URL" style="min-width:220px;" />
+            <select id="limitSelect" title="Results per page">
+              <option value="25">25</option>
+              <option value="50" selected>50</option>
+              <option value="100">100</option>
+            </select>
+
+            <select id="workflowFilter"><option value="">All workflows</option></select>
+            <select id="statusFilter">
+              <option value="">All statuses</option>
+              <option value="completed">Completed</option>
+              <option value="success">Success</option>
+              <option value="failure">Failure</option>
+              <option value="in_progress">In Progress</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+
+            <button class="btn" id="applyFilters">Apply</button>
+          </div>
+        </div>
+
+        <div class="table-body" id="pipelinesBody"><div class="loading">Loading...</div></div>
+
+        <div style="padding:0.8rem; background:#fafafa; display:flex; justify-content:space-between; align-items:center;">
+          <div class="muted" id="paginationInfo">-</div>
+          <div>
+            <button class="btn ghost" id="prevPage">Prev</button>
+            <button class="btn ghost" id="nextPage">Next</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Insights -->
+    <div id="insights" class="panel" style="display:none;">
+      <div class="grid" style="grid-template-columns:1fr;">
+        <div>
+          <div class="card" style="margin-bottom:1rem;">
+            <div style="font-weight:700;">Failure Hotspots</div>
+            <div class="muted" style="font-size:0.9rem; margin-top:0.5rem;">Workflows with highest failure rate (24h)</div>
+            <div id="hotspots" style="margin-top:0.8rem;"></div>
+          </div>
+
+          <div class="card">
+            <div style="font-weight:700;">Average Build Time per Workflow</div>
+            <div id="avgTimes" style="margin-top:0.6rem;"></div>
+          </div>
+        </div>
+
+        <aside class="right-panel">
+          <div class="detail-drawer">
+            <div style="font-weight:700;">Notes & Actions</div>
+            <div class="muted" style="margin-top:0.5rem;">Click a pipeline to reveal details and links to GitHub Actions run page.</div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* ------------------ Utilities ------------------ */
+const api = (path) => `/api${path}`; // existing backend prefixes match routes
+const tabs = document.querySelectorAll('.tab');
+const panels = document.querySelectorAll('.panel');
+const refreshBtn = document.getElementById('refreshBtn');
+
+let donutChart = null, trendChart = null;
+let pipelinesCache = []; // currently displayed pipelines (after client filtering)
+let currentPage = 1, currentLimit = 50, currentWorkflowFilter = '', currentStatusFilter = '', currentSearch = '';
+
+/* ------------------ Tabs ------------------ */
+tabs.forEach(t => t.addEventListener('click', () => {
+  tabs.forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  const target = t.getAttribute('data-tab');
+  panels.forEach(p => p.style.display = (p.id === target) ? '' : 'none');
+}));
+
+/* ------------------ Fetch wrapper ------------------ */
+async function fetchJson(url, opts={}) {
+  const resp = await fetch(url, {
+    cache: 'no-store',
+    ...opts,
+  });
+  if (!resp.ok) {
+    const txt = await resp.text().catch(()=> '');
+    throw new Error(`HTTP ${resp.status}: ${txt}`);
+  }
+  return resp.json();
+}
+
+/* ------------------ Charts ------------------ */
+function createDonut(values) {
+  const ctx = document.getElementById('donutChart').getContext('2d');
+  if (donutChart) donutChart.destroy();
+  donutChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: { labels: ['Success','Failure','Other'], datasets: [{ data: values, backgroundColor: ['#4caf50','#f44336','#9e9e9e'], borderWidth: 0 }] },
+    options: { cutout: '66%', plugins:{ legend:{ display:false } }, responsive:true }
+  });
+}
+function createTrend(points) {
+  const ctx = document.getElementById('trendChart').getContext('2d');
+  if (trendChart) trendChart.destroy();
+  const labels = points.map(p => new Date(p.x).toLocaleString());
+  const data = points.map(p => p.y);
+  trendChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: [{ label:'Success Rate (%)', data, borderColor:'#1976d2', backgroundColor:'rgba(25,118,210,0.08)', borderWidth:2, pointRadius:3, tension:0.3, fill:true }] },
+    options: { responsive:true, scales: { y: { beginAtZero:true, max:100 } } }
+  });
+}
+
+/* ------------------ Metrics ------------------ */
+function computeMetricsFromPipelines(pipelines) {
+  const now = Date.now(), dayAgo = now - 24*3600*1000;
+  const recent = pipelines.filter(p => {
+    const t = p.created_at ? Date.parse(p.created_at) : NaN;
+    return Number.isFinite(t) ? (t >= dayAgo && t <= now) : true;
+  });
+  const total = recent.length;
+  let success = 0, failure = 0, timeSum = 0, timeCnt = 0, last = null;
+  recent.forEach(p => {
+    const concl = (p.conclusion || p.status || '').toString().toLowerCase();
+    if (concl === 'success') success++;
+    else if (concl === 'failure') failure++;
+    if (typeof p.duration === 'number') { timeSum += p.duration; timeCnt++; }
+    if (!last) last = p; else {
+      const la = last.created_at ? Date.parse(last.created_at) : -Infinity;
+      const pb = p.created_at ? Date.parse(p.created_at) : -Infinity;
+      if (pb > la) last = p;
+    }
+  });
+  return {
+    success_rate: total ? success/total*100 : 0,
+    average_build_time: timeCnt ? timeSum/timeCnt : 0,
+    total_executions: total,
+    success_count: success,
+    failure_count: failure,
+    last_execution: last ? { status: last.status, conclusion: last.conclusion, created_at: last.created_at } : null
+  };
+}
+
+function ensureDonut(values, labelText) {
+  const total = values.reduce((a,b)=>a+b,0);
+  const safe = total === 0 ? [1,0,0] : values;
+  createDonut(safe);
+  document.getElementById('donutText').textContent = total === 0 ? 'No runs yet' : labelText;
+}
+
+async function loadMetrics() {
+  try {
+    const m = await fetchJson(api('/metrics?period=24h')).catch(()=>null);
+    const metrics = (m && typeof m === 'object') ? m : computeMetricsFromPipelines(pipelinesCache);
+    const successRate = typeof metrics.success_rate === 'number' ? metrics.success_rate : Number(metrics.success_rate || 0);
+    document.getElementById('successRate').textContent = `${successRate.toFixed(2)}%`;
+    document.getElementById('avgBuildTime').textContent = metrics.average_build_time ? ((metrics.average_build_time/60).toFixed(2) + ' min') : '-';
+    document.getElementById('totalExecutions').textContent = metrics.total_executions ?? 0;
+    document.getElementById('lastBuildStatus').textContent = metrics.last_execution ? (metrics.last_execution.conclusion || metrics.last_execution.status || '-') : '-';
+    document.getElementById('lastBuildWhen').textContent = metrics.last_execution && metrics.last_execution.created_at ? new Date(metrics.last_execution.created_at).toLocaleString() : '';
+
+    const successCount = metrics.success_count ?? 0;
+    const failureCount = metrics.failure_count ?? 0;
+    const other = Math.max(0, (metrics.total_executions ?? 0) - successCount - failureCount);
+    ensureDonut([successCount, failureCount, other], `${successCount} success • ${failureCount} failed${other>0?` • ${other} other`:''}`);
+
+    // trend
+    let trendPoints = [{ x:new Date(Date.now()-24*3600*1000).toISOString(), y: successRate }, { x:new Date().toISOString(), y: successRate }];
+    try {
+      const trends = await fetchJson(api('/metrics/trends?metric=success_rate&period=24h')).catch(()=>null);
+      if (trends && Array.isArray(trends.data) && trends.data.length >= 2) {
+        trendPoints = trends.data.map(d => ({ x: d.timestamp, y: d.value }));
+      }
+    } catch(_) {}
+    createTrend(trendPoints);
+  } catch (err) {
+    console.error('loadMetrics error', err);
+  }
+}
+
+/* ------------------ Status matching for filter robustness ------------------ */
+function matchesStatusFilter(p, filter) {
+  if (!filter) return true;
+  const f = String(filter).toLowerCase().trim();
+  const status = (p.status || '').toString().toLowerCase();
+  const conclusion = (p.conclusion || '').toString().toLowerCase();
+
+  if (f === 'success') return conclusion === 'success';
+  if (f === 'failure') return conclusion === 'failure';
+  if (f === 'completed') return status === 'completed';
+  if (f === 'in_progress' || f === 'in progress' || f === 'running') {
+    const running = ['in_progress','in progress','running','queued','pending','started'];
+    return running.includes(status) || running.includes(conclusion);
+  }
+  if (f === 'cancelled' || f === 'canceled') return conclusion === 'cancelled' || status === 'cancelled';
+  // fallback contains check
+  return status.includes(f) || conclusion.includes(f) || (p.workflow_name || '').toString().toLowerCase().includes(f);
+}
+
+/* ------------------ Load pipelines ------------------
+   - If status filter is one of server-side statuses (completed, in_progress, cancelled) we pass status param.
+   - If status filter is 'success' or 'failure' we do not pass status param (because backend status != conclusion)
+   - workflow param is passed when set.
+*/
+async function loadPipelines({ page = 1, limit = currentLimit, workflow = '', status = '', search = '' } = {}) {
+  try {
+    currentPage = page; currentLimit = limit; currentWorkflowFilter = workflow; currentStatusFilter = status; currentSearch = search;
+
+    // decide whether to pass status to backend or client-filter by conclusion
+    const passStatusToBackend = ['completed','in_progress','cancelled'].includes((status||'').toString().toLowerCase());
+
+    let url = api(`/pipelines/?page=${page}&limit=${limit}`)
+      + (workflow ? `&workflow=${encodeURIComponent(workflow)}` : '')
+      + (passStatusToBackend && status ? `&status=${encodeURIComponent(status)}` : '');
+    // NOTE: we purposely avoid adding `search` to backend because backend doesn't implement that param (we client-filter below)
+
+    const data = await fetchJson(url);
+    let pipelines = data.pipelines || [];
+
+    // client-side search
+    if (search && search.trim() !== '') {
+      const q = search.toLowerCase();
+      pipelines = pipelines.filter(p => {
+        const combined = [p.workflow_name, p.branch, p.commit_message, p.commit_sha, p.html_url].filter(Boolean).join(' ').toLowerCase();
+        return combined.includes(q);
+      });
+    }
+
+    // client-side workflow filter (redundant if passed server-side, but safe)
+    if (workflow && workflow.trim() !== '') {
+      pipelines = pipelines.filter(p => (p.workflow_name || '').toString() === workflow.toString());
+    }
+
+    // client-side status filter when user selected 'success' or 'failure' (or generic matching)
+    if (!passStatusToBackend && status && status.trim() !== '') {
+      pipelines = pipelines.filter(p => matchesStatusFilter(p, status));
+    }
+
+    pipelinesCache = pipelines;
+    renderPipelines(pipelines);
+
+    document.getElementById('paginationInfo').textContent = `Page ${data.page||1} • Total ${data.total ?? pipelines.length}`;
+    populateWorkflowFilter(pipelines);
+    computeInsightsFromPipelines(pipelines);
+
+    // auto-show last pipeline in overview (non-intrusive)
+    if (pipelines.length > 0 && document.querySelector('.tab.active').getAttribute('data-tab') === 'overview') {
+      // pick most recent
+      const last = pipelines.reduce((a,b) => new Date(a.created_at) > new Date(b.created_at) ? a : b);
+      openDrawerOverview(last);
+    }
+
+  } catch (err) {
+    console.error('loadPipelines error', err);
+    document.getElementById('pipelinesBody').innerHTML = `<div class="loading">Failed to load pipelines</div>`;
+  }
+}
+
+/* ------------------ Render pipelines ------------------ */
+function renderPipelines(pipelines) {
+  const body = document.getElementById('pipelinesBody');
+  if (!pipelines || pipelines.length === 0) {
+    body.innerHTML = `<div class="loading">No pipeline executions found</div>`;
+    return;
+  }
+
+  const html = pipelines.map(p => {
+    const statusClass = (p.conclusion || p.status || 'unknown').toString().toLowerCase();
+    const when = p.created_at ? new Date(p.created_at).toLocaleString() : '-';
+    const dur = (typeof p.duration === 'number') ? (p.duration/60).toFixed(2) + ' min' : '-';
+    const sha = p.commit_sha ? `• ${String(p.commit_sha).slice(0,7)}` : '';
+    return `<div class="pipeline-row" data-run="${escapeHtml(p.id||p.github_run_id||'')}">
+      <div>
+        <div class="pipeline-title">${escapeHtml(p.workflow_name||'—')}</div>
+        <div class="pipeline-sub">${escapeHtml(p.branch||'')} ${sha}</div>
+      </div>
+      <div>${when}</div>
+      <div>${dur}</div>
+      <div style="text-align:right;">
+        <div class="status ${statusClass}">${escapeHtml(p.conclusion||p.status||'')}</div>
+        <div style="margin-top:6px;"><a class="small-link" href="${escapeAttr(p.html_url||'#')}" target="_blank">Open</a></div>
+      </div>
+    </div>`;
+  }).join('');
+  body.innerHTML = html;
+
+  Array.from(body.querySelectorAll('.pipeline-row')).forEach(r => {
+    r.addEventListener('click', () => {
+      const key = r.getAttribute('data-run');
+      const p = pipelinesCache.find(x => String(x.id) === key || String(x.github_run_id) === key);
+      if (p) {
+        document.querySelector('.tab[data-tab="pipelines"]').click();
+        openDrawerPipelinePage(p);
+      }
+    });
+  });
+}
+
+/* ------------------ Populate workflow select ------------------ */
+async function populateWorkflowFilter(pipelines) {
+  try {
+    const sel = document.getElementById('workflowFilter');
+    const existing = new Set(Array.from(sel.options).map(o => o.value));
+    // Prefer fetching /api/metrics/workflows for authoritative list
+    try {
+      const w = await fetchJson(api('/metrics/workflows')).catch(()=>null);
+      if (w && Array.isArray(w.workflows)) {
+        w.workflows.forEach(wi => {
+          const name = wi.name || wi;
+          if (name && !existing.has(name)) {
+            const opt = document.createElement('option'); opt.value = name; opt.textContent = name; sel.appendChild(opt); existing.add(name);
+          }
+        });
+        return;
+      }
+    } catch(_) { /* ignore */ }
+
+    // fallback: use pipelines passed in
+    pipelines.forEach(p => {
+      if (p.workflow_name && !existing.has(p.workflow_name)) {
+        const opt = document.createElement('option'); opt.value = p.workflow_name; opt.textContent = p.workflow_name; sel.appendChild(opt); existing.add(p.workflow_name);
+      }
+    });
+  } catch(e) {
+    console.error('populateWorkflowFilter error', e);
+  }
+}
+
+/* ------------------ Drawers ------------------ */
+function openDrawerOverview(p) {
+  if (!p) return;
+  const panel = document.getElementById('selectedPipeline');
+  const cont = document.getElementById('selContent');
+  document.getElementById('selTitle').textContent = `${p.workflow_name} • #${p.github_run_id || p.id || ''}`;
+  cont.innerHTML = `
+    <div class="drawer-row"><strong>Status:</strong> <span class="status ${((p.conclusion||p.status)||'').toLowerCase()}">${escapeHtml(p.conclusion||p.status||'')}</span></div>
+    <div class="drawer-row"><strong>Branch:</strong> <span class="muted">${escapeHtml(p.branch||'-')}</span></div>
+    <div class="drawer-row"><strong>Commit:</strong> <div class="muted">${escapeHtml(p.commit_message||'-')}</div></div>
+    <div class="drawer-row"><strong>Actor:</strong> <span class="muted">${escapeHtml(p.actor||'-')}</span></div>
+    <div class="drawer-row"><strong>Duration:</strong> <span class="muted">${typeof p.duration==='number' ? (p.duration/60).toFixed(2) + ' min' : '-'}</span></div>
+  `;
+  panel.style.display = '';
+  document.getElementById('closeDrawer').onclick = () => panel.style.display = 'none';
+}
+function openDrawerPipelinePage(p) {
+  if (!p) return;
+  const panel = document.getElementById('selectedPipeline');
+  const cont = document.getElementById('selContent');
+  document.getElementById('selTitle').textContent = `${p.workflow_name} • #${p.github_run_id || p.id || ''}`;
+  cont.innerHTML = `
+    <div class="drawer-row"><strong>Status:</strong> <span class="status ${((p.conclusion||p.status)||'').toLowerCase()}">${escapeHtml(p.conclusion||p.status||'')}</span></div>
+    <div class="drawer-row"><strong>Started:</strong> <span class="muted">${p.created_at ? new Date(p.created_at).toLocaleString() : '-'}</span></div>
+    <div class="drawer-row"><strong>Ended:</strong> <span class="muted">${p.updated_at ? new Date(p.updated_at).toLocaleString() : '-'}</span></div>
+    <div class="drawer-row"><strong>Branch:</strong> <span class="muted">${escapeHtml(p.branch||'-')}</span></div>
+    <div class="drawer-row"><strong>Commit:</strong> <div class="muted">${escapeHtml(p.commit_message||'-')}</div></div>
+    <div class="drawer-row"><strong>Actor:</strong> <span class="muted">${escapeHtml(p.actor||'-')}</span></div>
+    <div class="drawer-row"><strong>Duration:</strong> <span class="muted">${typeof p.duration==='number' ? (p.duration/60).toFixed(2) + ' min' : '-'}</span></div>
+    <div class="drawer-row"><strong>SHA:</strong> <span class="muted">${escapeHtml(p.commit_sha||'-')}</span></div>
+    <div class="drawer-row"><strong>Workflow ID:</strong> <span class="muted">${escapeHtml(p.workflow_id||'-')}</span></div>
+    <div class="drawer-row"><a class="small-link" href="${escapeAttr(p.html_url||'#')}" target="_blank">Open run on GitHub</a></div>
+  `;
+  panel.style.display = '';
+  document.getElementById('closeDrawer').onclick = () => panel.style.display = 'none';
+}
+
+/* ------------------ Insights ------------------ */
+function computeInsightsFromPipelines(pipelines) {
+  const byWorkflow = {};
+  pipelines.forEach(p => {
+    const name = p.workflow_name || 'unknown';
+    if (!byWorkflow[name]) byWorkflow[name] = { total:0, success:0, failure:0, totalTime:0, countTime:0 };
+    byWorkflow[name].total++;
+    if ((p.status === 'completed' && p.conclusion === 'success') || p.conclusion === 'success') byWorkflow[name].success++;
+    if ((p.status === 'completed' && p.conclusion === 'failure') || p.conclusion === 'failure') byWorkflow[name].failure++;
+    if (typeof p.duration === 'number') { byWorkflow[name].totalTime += p.duration; byWorkflow[name].countTime++; }
+  });
+
+  const hotspots = Object.entries(byWorkflow).map(([name,data]) => {
+    const failRate = data.total ? (data.failure/data.total*100) : 0;
+    const avg = data.countTime ? (data.totalTime/data.countTime/60).toFixed(2) + ' min' : '-';
+    return { name, failRate, avg, total: data.total };
+  }).sort((a,b) => b.failRate - a.failRate).slice(0,10);
+
+  const hotspotsEl = document.getElementById('hotspots');
+  hotspotsEl.innerHTML = hotspots.length
+    ? hotspots.map(h => `<div class="insight-item"><div>${escapeHtml(h.name)} <div class="muted" style="font-size:0.82rem;">runs:${h.total}</div></div><div style="text-align:right">${h.failRate.toFixed(1)}% <div class="muted" style="font-size:0.82rem;">avg ${h.avg}</div></div></div>`).join('')
+    : '<div class="muted">No data</div>';
+
+  const avgTimesEl = document.getElementById('avgTimes');
+  avgTimesEl.innerHTML = Object.entries(byWorkflow).map(([name,data]) => {
+    const avg = data.countTime ? (data.totalTime/data.countTime/60).toFixed(2) + ' min' : '-';
+    return `<div class="insight-item"><div>${escapeHtml(name)}</div><div class="muted">${avg}</div></div>`;
+  }).join('');
+
+  const insightList = document.getElementById('insightList');
+  if (hotspots.length) {
+    insightList.innerHTML = hotspots.slice(0,3).map(h => `<div class="insight-item"><div>${escapeHtml(h.name)}</div><div>${h.failRate.toFixed(1)}%</div></div>`).join('');
+  } else {
+    insightList.innerHTML = `<div class="insight-item"><div>No insights yet</div></div>`;
+  }
+}
+
+/* ------------------ Helpers ------------------ */
+function escapeHtml(s) { if (s===0) return '0'; if (!s) return ''; return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+function escapeAttr(s) { return s ? String(s).replace(/"/g,'&quot;') : '#'; }
+
+/* ------------------ Pagination & filters wiring ------------------ */
+document.getElementById('nextPage').addEventListener('click', ()=> {
+  loadPipelines({ page: currentPage + 1, limit: currentLimit, workflow: currentWorkflowFilter, status: currentStatusFilter, search: currentSearch });
+});
+document.getElementById('prevPage').addEventListener('click', ()=> {
+  loadPipelines({ page: Math.max(1, currentPage - 1), limit: currentLimit, workflow: currentWorkflowFilter, status: currentStatusFilter, search: currentSearch });
+});
+document.getElementById('applyFilters').addEventListener('click', ()=> {
+  const wf = document.getElementById('workflowFilter').value;
+  const st = document.getElementById('statusFilter').value;
+  const lim = Number(document.getElementById('limitSelect').value || 50);
+  const q = document.getElementById('searchBox').value.trim();
+  currentSearch = q;
+  loadPipelines({ page:1, limit: lim, workflow: wf, status: st, search: q });
+});
+
+/* ------------------ Refresh & Sync ------------------ */
+refreshBtn.addEventListener('click', async ()=>{
+  refreshBtn.disabled = true; refreshBtn.textContent = 'Refreshing...';
+  try {
+    // trigger backend sync to fetch latest runs from GitHub
+    try {
+      const syncResp = await fetch(api('/pipelines/sync'), { method:'POST' });
+      if (!syncResp.ok) {
+        console.warn('Sync failed or not authorized; continuing to fetch existing DB data.');
+      } else {
+        await syncResp.text().catch(()=>null);
+      }
+    } catch(syncErr) {
+      console.warn('Sync request failed (continuing):', syncErr);
+    }
+    await doRefresh();
+  } finally {
+    refreshBtn.disabled = false; refreshBtn.textContent = 'Refresh';
+  }
+});
+
+setInterval(()=>{ if (document.visibilityState !== 'hidden') doRefresh(); }, 30000);
+
+async function doRefresh(){
+  await Promise.all([
+    loadPipelines({ page:1, limit: currentLimit, workflow: currentWorkflowFilter, status: currentStatusFilter, search: currentSearch }),
+    loadMetrics()
+  ]);
+}
+
+/* ------------------ Init ------------------ */
+(async function init(){
+  try {
+    await doRefresh();
+  } catch (e) {
+    console.error('init error', e);
+    try { await loadPipelines({ page:1, limit: currentLimit }); } catch(_) {}
+    try { await loadMetrics(); } catch(_) {}
+  }
+})();
+</script>
+</body>
+</html>
+
