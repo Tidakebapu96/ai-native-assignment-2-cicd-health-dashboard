@@ -138,6 +138,9 @@ assignment-2/
 │   ├── backend/              # deployment.yaml, service.yaml
 │   ├── frontend/             # deployment.yaml, service.yaml
 │   └── postgres/             # statefulset.yaml, service.yaml, pvc.yaml
+├── docs/
+│   ├── REQUIREMENT_ANALYSIS.md  # Feature specs and requirements
+│   └── TECH_DESIGN.md           # Architecture, API, DB schema
 ├── minikube-setup.sh         # One-command setup script
 ├── Makefile                  # kubectl-based dev commands
 ├── env.example               # Template — copy to .env

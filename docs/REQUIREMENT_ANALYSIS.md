@@ -19,7 +19,7 @@ This project builds a **CI/CD Pipeline Health Dashboard** that addresses all of 
 | 2 | **Success / failure rate** | Aggregate success and failure counts over configurable time windows (1h, 24h, 7d, 30d) |
 | 3 | **Average build time** | Calculate mean, min, and max build durations per workflow and overall |
 | 4 | **Last build status** | Show most recent run with commit message, actor, branch, and conclusion |
-| 5 | **Email alerts** | Send email notification when a pipeline run fails during sync |
+| 5 | **Email alerts** | Send email notification when a pipeline run fails during sync (optional — requires SMTP configuration) |
 | 6 | **Pipeline list view** | Table of all recent runs with status, workflow name, branch, duration |
 | 7 | **Per-workflow breakdown** | Metrics split by workflow name (CI Pipeline, Deploy, Health Check, etc.) |
 | 8 | **Manual sync trigger** | `POST /api/pipelines/sync` to force an immediate data refresh |
@@ -55,8 +55,11 @@ This project builds a **CI/CD Pipeline Health Dashboard** that addresses all of 
   - Per-workflow breakdown of all above
 
 ### FR-3: Alerting
-- System shall send an email when a pipeline run with `conclusion = failure` is detected during sync
+- System supports email notification when a pipeline run with `conclusion = failure` is detected during sync
+- Email alerting is **optional** — enabled only when `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, and `ALERT_EMAIL_TO` are configured
+- When disabled, failure events are still logged in the `alerts` table with `status = disabled`
 - Email must include: workflow name, branch, commit message, actor, run URL
+- Alert status is reported via `/api/health` → `"email": "enabled" | "disabled"`
 
 ### FR-4: Frontend UI
 - Display key metric cards: success rate, total runs, avg build time, last build status
@@ -100,7 +103,7 @@ This project builds a **CI/CD Pipeline Health Dashboard** that addresses all of 
 | **Container runtime** | Docker + Minikube | Local Kubernetes cluster without cloud dependency |
 | **Orchestration** | Kubernetes (Minikube) | Real-world K8s primitives: Secrets, NetworkPolicy, StatefulSet, Ingress |
 | **Ingress** | nginx-ingress-controller | Standard K8s ingress with host-based routing |
-| **Email** | Python smtplib (SMTP) | Standard library, no extra dependencies, works with Gmail/SMTP relay |
+| **Email** | Python smtplib (SMTP) | Standard library, no extra dependencies, works with any SMTP relay; auto-disables if not configured |
 
 ---
 
@@ -111,7 +114,7 @@ This project builds a **CI/CD Pipeline Health Dashboard** that addresses all of 
 | GitHub Actions | `GET /repos/{owner}/{repo}/actions/runs` | Fetch workflow run list |
 | GitHub Actions | `GET /repos/{owner}/{repo}/actions/runs/{run_id}` | Fetch individual run details |
 | GitHub API (auth check) | `GET /api.github.com/user` | Validate token in health check |
-| SMTP Server | Port 587 (TLS) | Send failure alert emails |
+| SMTP Server | Port 587 (TLS) | Send failure alert emails (optional — only used when SMTP vars are set) |
 
 ---
 

@@ -23,6 +23,7 @@
 │                        │  │  (every 5 min)       │  │    │
 │                        │  │  GitHub API → DB     │  │    │
 │                        │  │  Email on failure    │  │    │
+│                        │  │  (if SMTP enabled)   │  │    │
 │                        │  └─────────────────────┘  │    │
 │                        └────────────┬──────────────┘    │
 │                                     │                    │
@@ -43,7 +44,7 @@
 **Data Flow:**
 1. Backend background task polls GitHub Actions API every 5 minutes
 2. New workflow runs are stored in PostgreSQL `pipelines` table
-3. If a run has `conclusion = failure`, an email alert is sent via SMTP
+3. If a run has `conclusion = failure` and SMTP is configured, an email alert is sent; otherwise the event is logged in the `alerts` table as `disabled`
 4. Frontend fetches `/api/metrics/` and `/api/pipelines/` on load + every 30s
 5. Chart.js renders the data — no SSR, pure client-side
 
@@ -75,7 +76,8 @@
   "uptime": 3600.5,
   "database": "healthy",
   "github": "healthy",
-  "slack": "disabled"
+  "slack": "disabled",
+  "email": "disabled"
 }
 ```
 
@@ -334,6 +336,8 @@ securityContext:
 
 ## 6. Email Alert Flow
 
+> **Optional feature** — email alerting is disabled by default. To enable, set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, and `ALERT_EMAIL_TO` in your `.env` and K8s secret. The `/api/health` endpoint reports `"email": "enabled"` or `"email": "disabled"` accordingly.
+
 ```
 GitHub API sync
     │
@@ -341,12 +345,15 @@ GitHub API sync
 New run detected with conclusion = "failure"
     │
     ▼
-email_service.send_failure_alert(pipeline)
+email_service.enabled? (all 4 SMTP vars set)
     │
-    ├── Connects to SMTP_HOST:SMTP_PORT with TLS
-    ├── Authenticates with SMTP_USER / SMTP_PASSWORD
-    ├── Sends HTML email to ALERT_EMAIL_TO
-    └── Records alert in alerts table (type="email", status="sent")
+    ├── YES → send_failure_alert(pipeline)
+    │           ├── Connects to SMTP_HOST:SMTP_PORT with STARTTLS
+    │           ├── Authenticates with SMTP_USER / SMTP_PASSWORD
+    │           ├── Sends HTML email to ALERT_EMAIL_TO
+    │           └── Records alert: type="email", status="sent"
+    │
+    └── NO  → Records alert: type="email", status="disabled" (no-op)
 ```
 
 **Email content includes:**

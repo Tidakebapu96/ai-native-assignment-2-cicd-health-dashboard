@@ -27,7 +27,8 @@ assignment-2/
 │       │   └── pipeline.py           # Pydantic request/response schemas
 │       └── services/
 │           ├── __init__.py
-│           └── github_service.py     # GitHub Actions API client (httpx)
+│           ├── github_service.py     # GitHub Actions API client (httpx)
+│           └── email_service.py      # SMTP email alerting (optional, disabled by default)
 │
 ├── frontend/                         # Static dashboard UI
 │   ├── Dockerfile                    # nginxinc/nginx-unprivileged:alpine
@@ -53,6 +54,9 @@ assignment-2/
 │       ├── service.yaml              # ClusterIP service on port 5432
 │       └── pvc.yaml                  # PersistentVolumeClaim (2Gi)
 │
+├── docs/
+│   ├── REQUIREMENT_ANALYSIS.md           # Feature requirements, functional/non-functional specs
+│   └── TECH_DESIGN.md                    # Architecture, API reference, DB schema, UI layout
 ├── minikube-setup.sh                 # One-command setup (minikube + k8s deploy)
 ├── Makefile                          # kubectl-based dev/ops commands
 ├── env.example                       # Environment variable template
