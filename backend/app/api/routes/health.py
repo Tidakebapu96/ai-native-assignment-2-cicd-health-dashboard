@@ -8,6 +8,7 @@ import os
 from app.core.database import get_db
 from app.schemas.pipeline import HealthResponse
 from app.services.github_service import GitHubService
+from app.services.email_service import EmailService
 from app.core.config import settings
 
 router = APIRouter()
@@ -51,7 +52,8 @@ async def health_check(db: Session = Depends(get_db)):
         uptime=uptime,
         database=db_status,
         github=github_status,
-        slack="disabled"
+        slack="disabled",
+        email="enabled" if EmailService().enabled else "disabled"
     )
 
 @router.get("/ping")

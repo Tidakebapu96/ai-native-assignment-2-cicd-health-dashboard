@@ -1,11 +1,16 @@
 import httpx
 import asyncio
+import logging
 from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.models.pipeline import Pipeline
+from app.models.pipeline import Pipeline, Alert
 from app.schemas.pipeline import PipelineCreate
+from app.services.email_service import EmailService
+
+logger = logging.getLogger(__name__)
+_email_service = EmailService()
 
 class GitHubService:
     def __init__(self):
@@ -69,19 +74,29 @@ class GitHubService:
                         else:
                             new_pipeline = Pipeline(**pipeline_data.model_dump())
                             db.add(new_pipeline)
-                            # We must flush to get the ID for the alert table foreign key
+                            # Flush to get the ID before creating the alert FK reference
                             db.flush()
                             db.refresh(new_pipeline)
                             synced_pipelines.append(new_pipeline)
+                            # Send email alert for newly discovered failures
+                            if new_pipeline.conclusion == "failure":
+                                sent = _email_service.send_failure_alert(new_pipeline)
+                                alert = Alert(
+                                    pipeline_id=new_pipeline.id,
+                                    alert_type="email",
+                                    message=f"Pipeline '{new_pipeline.workflow_name}' failed on branch '{new_pipeline.branch}'",
+                                    status="sent" if sent else "disabled",
+                                )
+                                db.add(alert)
                     except Exception as e:
-                        print(f"[WARN] Failed to parse or add run {run.get('id')}: {e}")
+                        logger.warning("Failed to parse or add run %s: %s", run.get('id'), e)
 
                 db.commit()
                 if len(runs) < 100:
                     break
                 page += 1
             except Exception as e:
-                print(f"[ERROR] Failed to fetch page {page} from GitHub: {e}")
+                logger.error("Failed to fetch page %d from GitHub: %s", page, e)
                 db.rollback()
-                break # Stop sync on page failure
+                break  # Stop sync on page failure
         return synced_pipelines

@@ -28,9 +28,16 @@ class Settings(BaseSettings):
     # Sync settings
     SYNC_INTERVAL_SECONDS: int = 300  # 5 minutes
     MAX_SYNC_RETRIES: int = 3
-    
+
     # Cache settings
     CACHE_TTL_SECONDS: int = 300  # 5 minutes
+
+    # Email alert settings (optional — leave blank to disable)
+    SMTP_HOST: Optional[str] = None
+    SMTP_PORT: int = 587
+    SMTP_USER: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    ALERT_EMAIL_TO: Optional[str] = None
     
     @property
     def DATABASE_URL(self) -> str:

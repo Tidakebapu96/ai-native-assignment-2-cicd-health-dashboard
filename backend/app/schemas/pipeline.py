@@ -84,4 +84,5 @@ class HealthResponse(BaseModel):
     database: str = Field(..., description="Database connection status")
     github: str = Field(..., description="GitHub API connection status")
     slack: str = Field(..., description="Slack webhook connection status")
+    email: Optional[str] = Field(None, description="Email alert status")
 
